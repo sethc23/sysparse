@@ -13,7 +13,6 @@ import                                          argcomplete,argparse,argh
 from argh.decorators import                     *
 from argcomplete.completers import              ChoicesCompleter
 
-from system_settings import                     DB_HOST
 in_args                                     =   argv if not os_environ.has_key('COMP_LINE') else os_environ['COMP_LINE'].split()
 from ipdb import                                set_trace                   as i_trace
 #i_trace()
@@ -141,6 +140,7 @@ def parse_choices_from_exec(cmd,parsed_args=[]):
     return _out
 
 def parse_choices_from_pgsql(query,parsed_args=[]):
+    from system_settings import                     DB_HOST
     # if __file__=='system_argparse.py':          return []
     run_qry                                 =   True
     if parsed_args:
@@ -200,147 +200,148 @@ def parse_function(class_func,parser,in_args):
             break
 
     arg_defaults                            =   None if not arg_specs.defaults else dict(zip(arg_specs.args[-len(arg_specs.defaults):],arg_specs.defaults))
-    for i in range(len(class_func.argh_args)):
-        arg_name,arg_names,arg_val          =   None,None,None
-        arg_val_is_null                     =   False                           # Used to distinquish between null input and null value as input
-        it                                  =   dict(class_func.argh_args[i])
-        # print it
-        if it.has_key('completer'):
-            it['choices']                   =   it['completer']
-            if not os_environ.has_key('COMP_LINE'):
-                del it['completer']
+    if hasattr(class_func,'argh_args'):
+        for i in range(len(class_func.argh_args)):
+            arg_name,arg_names,arg_val          =   None,None,None
+            arg_val_is_null                     =   False                           # Used to distinquish between null input and null value as input
+            it                                  =   dict(class_func.argh_args[i])
+            # print it
+            if it.has_key('completer'):
+                it['choices']                   =   it['completer']
+                if not os_environ.has_key('COMP_LINE'):
+                    del it['completer']
 
-        # Get Arg Info
-        arg_names                           =   it['option_strings']
-        if not len(arg_names):
-            break
-        arg_name                            =   arg_names[0]
+            # Get Arg Info
+            arg_names                           =   it['option_strings']
+            if not len(arg_names):
+                break
+            arg_name                            =   arg_names[0]
 
-        # Get Value of Positional Arg (if any)
-        if not arg_name[0]=='-':
-            if i>len(non_help_in_args)-1:
-                arg_val                     =   ''
-            else:
-                arg_val                     =   non_help_in_args[i]
-                if not arg_val:
-                    arg_val_is_null         =   True
-
-        # Get Value of Optional Arg (if any)
-        else:
-
-            # Special Case for Piped Data
-            if it.has_key('dest') and it['dest']=='input':
-                if globals().has_key('input_text') and input_text:
-                    arg_val                 =   input_text
-                    idx                     =   in_args.index('---')
-                    last_args.extend(           [in_args.pop(idx),input_text])
+            # Get Value of Positional Arg (if any)
+            if not arg_name[0]=='-':
+                if i>len(non_help_in_args)-1:
+                    arg_val                     =   ''
                 else:
-                    arg_val_is_null         =   True
+                    arg_val                     =   non_help_in_args[i]
+                    if not arg_val:
+                        arg_val_is_null         =   True
 
-            # Normal Case
+            # Get Value of Optional Arg (if any)
             else:
-                for _arg in arg_names:
-                    if non_help_in_args.count(_arg):
-                        idx                 =   non_help_in_args.index(_arg)
-                        try:
-                            arg_val         =   non_help_in_args[idx+1]
-                        except:
-                            print it
-                            print _arg
-                            i_trace()
-                        if not arg_val:
-                            arg_val_is_null =   True
-                        break
 
-        del it['option_strings']
+                # Special Case for Piped Data
+                if it.has_key('dest') and it['dest']=='input':
+                    if globals().has_key('input_text') and input_text:
+                        arg_val                 =   input_text
+                        idx                     =   in_args.index('---')
+                        last_args.extend(           [in_args.pop(idx),input_text])
+                    else:
+                        arg_val_is_null         =   True
 
-        # CASE: arg value in command line
-        #   include arg in usage
-        #   suppress help
+                # Normal Case
+                else:
+                    for _arg in arg_names:
+                        if non_help_in_args.count(_arg):
+                            idx                 =   non_help_in_args.index(_arg)
+                            try:
+                                arg_val         =   non_help_in_args[idx+1]
+                            except:
+                                print it
+                                print _arg
+                                i_trace()
+                            if not arg_val:
+                                arg_val_is_null =   True
+                            break
 
-        if arg_val:
-            it['help']                      =   argparse.SUPPRESS
-            p.usage                        +=   ' ' + arg_val
+            del it['option_strings']
 
-            # CASE: if arg_val is not contained in choices, e.g., partial arg val
-            if it.has_key('choices'):
-                if not it['choices'].count(arg_val):
-                    tmp_p                   =   argcomplete.argparse.ArgumentParser(add_help=False)
-                    tmp_p.add_argument(         *arg_names,**it).completer = parser_completer
-                    tmp_p                   =   add_arg_help(tmp_p)
-                    argcomplete.autocomplete(   tmp_p)
+            # CASE: arg value in command line
+            #   include arg in usage
+            #   suppress help
 
-        # CASE: no arg value in command line
-        #   (generally):
-        #       add line with CHOICES if applicable
-        #       add line with DEFAULT
-        #
-        #   usage:
-        #       if positional, make all caps
-        #       if optional, enclose with brackets
-        #
-        #   positional help text:
-        #       use arg_name.upper() as metavar
-        #       
-        #   optional help text:
-        #       if applicable, add line "NOTE: argument can be specified multiple times"
-        # 
-        else:
+            if arg_val:
+                it['help']                      =   argparse.SUPPRESS
+                p.usage                        +=   ' ' + arg_val
 
-            if not arg_names[0][0]=='-' and not arg_name[0]=='-':
-                p.usage                    +=   ' ' + arg_name.upper()
-                it['metavar']               =   arg_name.upper()
+                # CASE: if arg_val is not contained in choices, e.g., partial arg val
+                if it.has_key('choices'):
+                    if not it['choices'].count(arg_val):
+                        tmp_p                   =   argcomplete.argparse.ArgumentParser(add_help=False)
+                        tmp_p.add_argument(         *arg_names,**it).completer = parser_completer
+                        tmp_p                   =   add_arg_help(tmp_p)
+                        argcomplete.autocomplete(   tmp_p)
 
-                if it.has_key('type'):
-                    print 'last_here'
-
-                # if, while iterating through current command line arg, 
-                #   a positional argument is reached without a value,
-                #   create temp. parser and run autocomplete function for said positional arg
-                tmp_p                       =   argcomplete.argparse.ArgumentParser(add_help=False)
-                tmp_p.add_argument(             *arg_names,**it).completer = parser_completer
-                tmp_p                       =   add_arg_help(tmp_p)
-                argcomplete.autocomplete(       tmp_p)
-
+            # CASE: no arg value in command line
+            #   (generally):
+            #       add line with CHOICES if applicable
+            #       add line with DEFAULT
+            #
+            #   usage:
+            #       if positional, make all caps
+            #       if optional, enclose with brackets
+            #
+            #   positional help text:
+            #       use arg_name.upper() as metavar
+            #       
+            #   optional help text:
+            #       if applicable, add line "NOTE: argument can be specified multiple times"
+            # 
             else:
-                p.usage                    +=   ' [%s]' % arg_name
-                if it.has_key('choices'):
-                    it['metavar']           =   ''
 
-                if it.has_key('default') and arg_name[0]=='-':
-                    if type(it['default'])==list:
-                        in_args.append(         arg_name)
-                        for a in it['default']:
-                            in_args.append(     a)
-                    else:       
-                        in_args.extend(         [arg_name,it['default']])
+                if not arg_names[0][0]=='-' and not arg_name[0]=='-':
+                    p.usage                    +=   ' ' + arg_name.upper()
+                    it['metavar']               =   arg_name.upper()
 
-            if it.has_key('help'):
+                    if it.has_key('type'):
+                        print 'last_here'
 
-                if it.has_key('action') and it['action']=='append':
-                    it['help']             +=   '\nNOTE: argument can be specified multiple times'
+                    # if, while iterating through current command line arg, 
+                    #   a positional argument is reached without a value,
+                    #   create temp. parser and run autocomplete function for said positional arg
+                    tmp_p                       =   argcomplete.argparse.ArgumentParser(add_help=False)
+                    tmp_p.add_argument(             *arg_names,**it).completer = parser_completer
+                    tmp_p                       =   add_arg_help(tmp_p)
+                    argcomplete.autocomplete(       tmp_p)
 
-                if it.has_key('choices'):
-                    it['help']             +=   '\nCHOICES: %s' % str(it['choices']).strip('[]')
+                else:
+                    p.usage                    +=   ' [%s]' % arg_name
+                    if it.has_key('choices'):
+                        it['metavar']           =   ''
 
-                if it.has_key('default'):
-                    it['help']             +=   '\nDEFAULT: %s' % it['default']
-        
-        if it.has_key('default') and not in_args and not arg_name[0]=='-':
-            in_args.append(                     it['default'])
+                    if it.has_key('default') and arg_name[0]=='-':
+                        if type(it['default'])==list:
+                            in_args.append(         arg_name)
+                            for a in it['default']:
+                                in_args.append(     a)
+                        else:       
+                            in_args.extend(         [arg_name,it['default']])
 
-        # Removing null values from command line
-        if arg_val_is_null:
-            if in_args.count(arg_name):
-                idx                         =   in_args.index(arg_name)
-                i_trace()
-                z                           =   in_args.pop(idx)
-                z                           =   in_args.pop(idx)
-        else:
-            p.add_argument(                 *arg_names,**it)
+                if it.has_key('help'):
 
-        # print it
-    # i_trace()
+                    if it.has_key('action') and it['action']=='append':
+                        it['help']             +=   '\nNOTE: argument can be specified multiple times'
+
+                    if it.has_key('choices'):
+                        it['help']             +=   '\nCHOICES: %s' % str(it['choices']).strip('[]')
+
+                    if it.has_key('default'):
+                        it['help']             +=   '\nDEFAULT: %s' % it['default']
+            
+            if it.has_key('default') and not in_args and not arg_name[0]=='-':
+                in_args.append(                     it['default'])
+
+            # Removing null values from command line
+            if arg_val_is_null:
+                if in_args.count(arg_name):
+                    idx                         =   in_args.index(arg_name)
+                    i_trace()
+                    z                           =   in_args.pop(idx)
+                    z                           =   in_args.pop(idx)
+            else:
+                p.add_argument(                 *arg_names,**it)
+
+            # print it
+        # i_trace()
     p.usage                                +=   ' [--help]\n'
 
     # If Class/Module only has one function, the function is called by default but need not show in usage
@@ -376,7 +377,8 @@ def parse_module_or_class(mod_class,parser,in_args,parse_type='class'):
     if parse_type=='class':
         fxs                                 =   [name for name,fx in inspect.getmembers(mod_class,inspect.ismethod) if hasattr(fx,'argh_args')]
     elif parse_type=='module':
-        fxs                                 =   [name for name,fx in inspect.getmembers(mod_class,inspect.isfunction) if hasattr(fx,'argh_args')]
+        # fxs                                 =   [name for name,fx in inspect.getmembers(mod_class,inspect.isfunction) if hasattr(fx,'argh_args')]
+        fxs                                 =   [name for name,fx in inspect.getmembers(mod_class,inspect.isfunction)]
 
     # i_trace()
 
@@ -542,6 +544,9 @@ def run_custom_argparse(kwargs=None):
     if kwargs:
         for k,v in kwargs.iteritems():
             globals().update({k:v})
+
+    import ipdb as I; I.set_trace()
+
     mod_regex                               =   '' if not globals().has_key('mod_regex') else mod_regex
     mod_excludes                            =   [] if not globals().has_key('mod_excludes') else mod_excludes
     MODULE                                  =   inspect.stack()[-1][1]
@@ -550,6 +555,7 @@ def run_custom_argparse(kwargs=None):
                                                              excludes=mod_excludes)
     if not c:                                   raise SystemExit
     if type(c)==tuple:                  c   =   c[0]
+
 
     if no_class or hasattr(c,'_class'):
         import imp
