@@ -51,6 +51,86 @@ def arg_basic(*args,**kwargs):
         return func
 
     return wrapper
+
+def arg_by_pgsql(*args,**kwargs):
+    # expecting ( query,parsed_args=[] )
+    from argh.constants                 import ATTR_ARGS
+    from argh.assembling                import  _get_args_from_signature
+
+    # i_trace()
+    def wrapper(func):
+        declared_args                   =   getattr(func, ATTR_ARGS, [])
+
+        run_qry                                 =   True
+        if parsed_args:
+            run_qry,qry_vars                    =   False,[]
+            for it in parsed_args:
+                if in_args.count(it):
+                    idx                         =   in_args.index(it)
+                    qry_vars.append(                in_args[idx+1])
+            if len(qry_vars)==len(parsed_args):
+                query                           =   query % tuple(qry_vars)
+                run_qry                         =   True
+        if not run_qry or query.count(r'%s'):
+            return []
+
+        cmd                                     =   'curl --get "http://%s:9999/qry" --data-urlencode "qry=%s" 2> /dev/null ;'
+        (_out,_err)                             =   sub_popen(cmd % (DB_HOST,query.replace('\n','')),
+                                                          stdout=sub_PIPE,shell=True).communicate()
+        assert _err                             is   None
+
+        try:
+            j_res                               =   eval(_out)
+        except:
+            print "ERROR -- dropping to ipy"
+            i_trace(                                )
+
+        # i_trace()
+        # for it in ['action','default','choices']:
+        #     if declared_args.has_key(it):
+        #         del declared_args[it]
+        setattr(                            func, 'res', sorted([it['res'] for it in j_res]))
+        return func
+
+    return wrapper
+
+def arg_by_shell(*args,**kwargs):
+    # expecting ( query,parsed_args=[] )
+    from argh.constants                 import ATTR_ARGS
+    from argh.assembling                import  _get_args_from_signature
+
+    # i_trace()
+    def wrapper(func):
+        declared_args                   =   getattr(func, ATTR_ARGS, [])
+
+        run_cmd                                 =   True
+        if parsed_args:
+            run_cmd,cmd_vars                    =   False,[]
+            for it in parsed_args:
+                if in_args.count(it):
+                    idx                         =   in_args.index(it)
+                    cmd_vars.append(                in_args[idx+1])
+            if len(cmd_vars)==len(parsed_args):
+                cmd                             =   cmd % tuple(cmd_vars)
+                run_cmd                         =   True
+        if not run_cmd:
+            RES = []
+        # os.system(                                     "logger -t 'PY_PARSE_EXEC_1' '%s'" % str(cmd))
+        (_out,_err)                             =   sub_popen(cmd.replace('\n',''),
+                                                          stdout=sub_PIPE,shell=True).communicate()
+        assert _err                             is   None
+        RES = _out
+        # i_trace()
+        # for it in ['action','default','choices']:
+        #     if declared_args.has_key(it):
+        #         del declared_args[it]
+        setattr(                            func, 'res', RES )
+        return func
+
+    return wrapper
+
+
+
 def get_default_args(self,func):
     """
     returns a dictionary of arg_name:default_values for the input function
