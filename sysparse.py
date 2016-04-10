@@ -10,24 +10,38 @@ from argcomplete.completers import ChoicesCompleter
 
 from sys_reporter import sys_reporter
 
-global pgsql_queries
+global pgsql_queries,choices
 pgsql_queries = {}
+choices = {}
+
 in_args = argv if not os.environ.has_key('COMP_LINE') else os.environ['COMP_LINE'].split()
+DEBUG_PARSING=False
+
 
 def basic_components():
-    # from importlib import import_module
-    # _this_file          =   __file__[__file__.rfind('/') + 1:]
-    # _this_mod           =   _this_file[:-3] if _this_file[-2:]=='py' else _this_file[:-4]
-    # _mod                =   import_module(_this_mod)
-    # _components         =   []
-    # for it in inspect.getmembers(_mod, inspect.isfunction):
-    #     _components.append(it)
+    from importlib import import_module
+    _this_file          =   __file__[__file__.rfind('/') + 1:]
+    _this_mod           =   _this_file[:-3] if _this_file[-2:]=='py' else _this_file[:-4]
+    _mod                =   import_module(_this_mod)
+    _components         =   []
+    for it in inspect.getmembers(_mod, inspect.isfunction):
+        _components.append(it)
 
-    # for it in inspect.getmembers(_mod, inspect.isclass):
-    #     _components.append(it)
+    for it in inspect.getmembers(_mod, inspect.isclass):
+        _components.append(it)
 
-    # return _components
-    return True
+    return _components
+
+def result_choices():
+    if choices.has_key('result'):
+        return choices['result']
+
+    from sys_reporter import sys_reporter
+    res = [name.lstrip('_') for name,fx
+             in inspect.getmembers(sys_reporter,inspect.ismethod)
+             if (name.find('_')==0 and name.find('__')==-1)]
+    choices['result'] = res
+    return res
 
 
 def arg_custom(*args, **kwargs):
@@ -230,7 +244,6 @@ def parse_choices_from_pgsql(query, parsed_args = []):
     query = re.sub('[\\s]{2,}', ' ', query).strip()
     if pgsql_queries.has_key(query):
         return pgsql_queries[query]
-    print '\n\nNEW QUERY\n\n'
     from system_settings import DB_HOST
     run_qry = True
     if parsed_args:
@@ -256,8 +269,7 @@ def parse_choices_from_pgsql(query, parsed_args = []):
         return this_res
     except:
         print 'ERROR -- dropping to ipy'
-        from ipdb import set_trace
-        set_trace()
+        import ipdb as I; I.set_trace()
 
 
 def parser_completer(prefix, parsed_args, **kwargs):
@@ -269,25 +281,28 @@ def parser_completer(prefix, parsed_args, **kwargs):
 
 
 def parse_function(class_func, parser, in_args):
+    if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno,'parse_function'
     p, THIS_ARG, last_args = parser, in_args[0], []
     in_args = in_args[1:]
-    non_help_in_args = [ it for it in in_args if not it == '--help' ]
+    non_help_in_args = [ it for it in in_args if not it=='--help' ]
     p.description = class_func.__doc__
     p.usage = '\n\t' + ' '.join([p.usage.replace(' [--help]', '').strip('\n'), THIS_ARG])
     pre_existing_args = p.usage.split()[1:]
     # Special Case (need to include default arg when parsing command line)
     if single_class:
-        pre_existing_args = [single_class]
+        pre_existing_args = [single_class,THIS_ARG]
     t = inspect.stack()[:]
     t.reverse()
     for it in t:
         if it[3] == 'parse_function':
             arg_specs = inspect.getargspec(inspect.getargvalues(it[0]).locals['class_func'])
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             break
 
     # if hasattr(class_func,'argh_args'):
     arg_defaults = None if not arg_specs.defaults else dict(zip(arg_specs.args[-len(arg_specs.defaults):], arg_specs.defaults))
     for i in range(len(class_func.argh_args)):
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno,'(iter) ARG_NUM:',i
         arg_name, arg_names, arg_val = (None, None, None)
         arg_val_is_null = False
         it = dict(class_func.argh_args[i])
@@ -299,11 +314,13 @@ def parse_function(class_func, parser, in_args):
         # Get Arg Info
         arg_names = it['option_strings']
         if not len(arg_names):
-            break
+            return p.parse_args(pre_existing_args + [THIS_ARG])
+            # break
         arg_name = arg_names[0]
 
         # Get Value of Positional Arg (if any)
         if not arg_name[0] == '-':
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             if i > len(non_help_in_args) - 1:
                 arg_val = ''
             else:
@@ -311,33 +328,33 @@ def parse_function(class_func, parser, in_args):
                 if not arg_val:
                     arg_val_is_null = True
 
+        # Special Case for Piped Data
+        elif it.has_key('dest') and it['dest'] == 'input':
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
+            if globals().has_key('input_text') and input_text:
+                arg_val = input_text
+                idx = in_args.index('---')
+                last_args.extend([in_args.pop(idx), input_text])
+            else:
+                if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
+                arg_val_is_null = True
+                
         # Get Value of Optional Arg (if any)
         else:
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
+            for _arg in arg_names:
+                if non_help_in_args.count(_arg):
+                    idx = non_help_in_args.index(_arg)
+                    try:
+                        arg_val = non_help_in_args[idx + 1]
+                    except:
+                        print it
+                        print _arg
+                        import ipdb as I; I.set_trace()
 
-            # Special Case for Piped Data
-            elif it.has_key('dest') and it['dest'] == 'input':
-                if globals().has_key('input_text') and input_text:
-                    arg_val = input_text
-                    idx = in_args.index('---')
-                    last_args.extend([in_args.pop(idx), input_text])
-                else:
-                    arg_val_is_null = True
-                    
-            # Normal Case
-            else:
-                for _arg in arg_names:
-                    if non_help_in_args.count(_arg):
-                        idx = non_help_in_args.index(_arg)
-                        try:
-                            arg_val = non_help_in_args[idx + 1]
-                        except:
-                            print it
-                            print _arg
-                            i_trace()
-
-                        if not arg_val:
-                            arg_val_is_null = True
-                        break
+                    if not arg_val:
+                        arg_val_is_null = True
+                    break
 
         del it['option_strings']
 
@@ -346,6 +363,7 @@ def parse_function(class_func, parser, in_args):
         #   suppress help
 
         if arg_val:
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             it['help'] = argparse.SUPPRESS
             p.usage += ' ' + arg_val
             # CASE: if arg_val is not contained in choices, e.g., partial arg val
@@ -356,22 +374,23 @@ def parse_function(class_func, parser, in_args):
                     tmp_p = add_arg_help(tmp_p)
                     argcomplete.autocomplete(tmp_p)
         # CASE: no arg value in command line
-        #   (generally):
-        #       add line with CHOICES if applicable
-        #       add line with DEFAULT
-        #
-        #   usage:
-        #       if positional, make all caps
-        #       if optional, enclose with brackets
-        #
-        #   positional help text:
-        #       use arg_name.upper() as metavar
-        #       
-        #   optional help text:
-        #       if applicable, add line "NOTE: argument can be specified multiple times"
-        # 
+            #   (generally):
+            #       add line with CHOICES if applicable
+            #       add line with DEFAULT
+            #
+            #   usage:
+            #       if positional, make all caps
+            #       if optional, enclose with brackets
+            #
+            #   positional help text:
+            #       use arg_name.upper() as metavar
+            #       
+            #   optional help text:
+            #       if applicable, add line "NOTE: argument can be specified multiple times"
+            # 
         else:
             if not arg_names[0][0] == '-' and not arg_name[0] == '-':
+                if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
                 p.usage += ' ' + arg_name.upper()
                 it['metavar'] = arg_name.upper()
                 if it.has_key('type'):
@@ -384,6 +403,7 @@ def parse_function(class_func, parser, in_args):
                 tmp_p = add_arg_help(tmp_p)
                 argcomplete.autocomplete(tmp_p)
             else:
+                if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
                 p.usage += ' [%s]' % arg_name
                 if it.has_key('choices'):
                     it['metavar'] = ''
@@ -404,28 +424,37 @@ def parse_function(class_func, parser, in_args):
                     it['help'] += '\nDEFAULT: %s' % it['default']
         if it.has_key('default') and not in_args and not arg_name[0] == '-':
             in_args.append(it['default'])
+
         # Removing null values from command line
         if arg_val_is_null:
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             if in_args.count(arg_name):
                 idx = in_args.index(arg_name)
                 i_trace()
                 z = in_args.pop(idx)
                 z = in_args.pop(idx)
         else:
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             p.add_argument(*arg_names, **it)
 
+    if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno,'(iter end)'
     p.usage += ' [--help]\n'
     # If Class/Module only has one function, the function is called by default but need not show in usage
     if single_function:
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         p.usage = p.usage.replace(' %s ' % single_function, ' ')
     if not in_args or os.environ.has_key('COMP_LINE'):
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         argcomplete.autocomplete(p)
+        import ipdb as I; I.set_trace()
         return p.parse_known_args()
         # return argh.dispatch(p)
     if in_args.count('--help'):
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         p.print_help()
         exit(1)
     else:
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         # print pre_existing_args + in_args + last_args
         # i_trace()
 
@@ -435,11 +464,15 @@ def parse_function(class_func, parser, in_args):
         #     os.system(                         "logger -t 'PY_PARSE_F2' '%s'" % str('>>'+str(in_args)+'<<'))
         
         if single_class and single_function and in_args == [single_function]:
+            if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
             return class_func()
+        # import ipdb as I; I.set_trace()
+        
         return p.parse_args(pre_existing_args + in_args + last_args)
 
 
 def parse_module_or_class(mod_class, parser, in_args, parse_type = 'class'):
+    if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno,'parse_module_or_class'
     global single_function
     p = parser
     non_help_in_args = [ it for it in in_args if not it == '--help' ]
@@ -476,6 +509,7 @@ def parse_module_or_class(mod_class, parser, in_args, parse_type = 'class'):
         sp.metavar = 'FUNCTION'
         p.usage += ' %s [--help]' % sp.metavar
         argcomplete.autocomplete(p)
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         return p.parse_args()
     # Unrecognized Parse instruction
     if in_args and not fxs.count(in_args[0]):
@@ -483,6 +517,7 @@ def parse_module_or_class(mod_class, parser, in_args, parse_type = 'class'):
         print 'Unrecognized <function>'
         print in_args
         p.print_help()
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         exit(1)
     # Execute Parse instruction
     else:
@@ -493,13 +528,13 @@ def parse_module_or_class(mod_class, parser, in_args, parse_type = 'class'):
         #     os.system(                         "logger -t 'PY_PARSE_C3' '%s'" % str('>>'+str(p.usage)+'<<'))
         p_help = argparse.SUPPRESS if [ it for it in in_args if not it == '--help' ] else mod_class.__doc__
         p.add_argument('_func', choices=fxs, help=p_help)
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         return parse_function(getattr(mod_class, in_args[0]), p, in_args)
 
 
 def parse_module(mod_path, regex, excludes):
-    global no_class
-    global single_class
-    global mod
+    if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno,'parse_module'
+    global no_class, single_class, mod
     in_args = argv if not os.environ.has_key('COMP_LINE') else os.environ['COMP_LINE'].split()
     in_args = in_args[1:]
     import imp
@@ -526,6 +561,7 @@ def parse_module(mod_path, regex, excludes):
     # If no classes, send to parse as 'module'
     if len(avail_classes.values()) == 0:
         no_class, single_class = True, False
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         return parse_module_or_class(mod, p, in_args, 'module')
     # If Module only has one Class, this Class is called by default
     if len(avail_classes.values()) == 1:
@@ -548,6 +584,7 @@ def parse_module(mod_path, regex, excludes):
         sp.metavar = 'FUNCTION_CLASS'
         p.usage = tmp_usage + ' %s [--help]' % sp.metavar
         argcomplete.autocomplete(p)
+        if DEBUG_PARSING: print print_line_number()
         return p.parse_args()
     # Unrecognized Parse instruction
     if not avail_classes.values().count(in_args[0]):
@@ -559,6 +596,7 @@ def parse_module(mod_path, regex, excludes):
         print in_args
         p.print_help()
         import sys
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         sys.exit(1)
     # Execute Parse instruction
     else:
@@ -569,6 +607,7 @@ def parse_module(mod_path, regex, excludes):
         p_help = argparse.SUPPRESS if [ it for it in in_args if not it == '--help' ] else 'Functions to operate'
         p.add_argument('_class', help=p_help, choices=sorted(avail_classes.values()))
         p.usage = p.format_usage().replace('usage: ', '', 1).replace('[--help] {_class}', in_args[0] + ' [--help]')
+        if DEBUG_PARSING: print 'LINE:',inspect.getframeinfo(inspect.currentframe()).lineno
         return parse_module_or_class(getattr(mod, avail_classes.keys()[avail_classes.values().index(in_args[0])])(), p, in_args)
 
 
