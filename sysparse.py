@@ -8,7 +8,8 @@ import types as TYPES
 from argh.decorators import *
 from argcomplete.completers import ChoicesCompleter
 
-from sys_reporter import sys_reporter
+# Commented this while loading http://ipy.sanspaper.com/notebooks/GOOGLE_API.ipynb#
+# from sys_reporter import sys_reporter
 
 global pgsql_queries,choices
 pgsql_queries = {}
