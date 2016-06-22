@@ -10,6 +10,10 @@ from argcomplete.completers import ChoicesCompleter
 
 # Commented this while loading http://ipy.sanspaper.com/notebooks/GOOGLE_API.ipynb#
 # from sys_reporter import sys_reporter
+import sys
+sys.path.append(os.environ['HOME']+'/.scripts/syscontrol')
+from syscontrol import sys_reporter
+
 
 global pgsql_queries,choices
 pgsql_queries = {}
